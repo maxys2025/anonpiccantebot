@@ -29,6 +29,7 @@ domande = [
     "A che età hai dato il primo bacio?",
     "A che età hai fatto sesso la prima volta?",
     "Preferisci dominare o essere dominato?",
+    "C'è una persona che conosci, al di fuori di noi, con cui vorresti fare sesso?",
     "Che voto ti daresti come amante?",
     "Con chi faresti una cosa a tre?",
     "Con quale celebrità andresti a letto più di una volta?",
@@ -40,6 +41,7 @@ domande = [
     "Quando ti sei masturbato l'ultima volta?",
     "Descrivi il tuo bacio più memorabile.",
     "Descrivi la tua stranezza che ti eccita di più.",
+    "Di che taglia sono i preservativi che compri?",
     "Faresti sesso con uno sconosciuto per 1000€?",
     "Faresti un account onlyfans?",
     "Faresti uno spogliarello per la persona con cui stai facendo questo gioco?",
@@ -78,6 +80,7 @@ domande = [
     "Pensi che le dimensioni siano importanti?",
     "Preferiresti fare una cosa a tre con due uomini o due donne?",
     "Preferisci fare sesso con un pene lungo o con un pene largo?",
+    "Preferisci fare sesso quando fa molto caldo o molto freddo?",
     "Qual è il luogo più strano in cui hai fatto sesso?",
     "Qual è il numero massimo di volte che hai fatto sesso in un giorno?",
     "Qual è il tuo posto preferito per una sveltina?",
@@ -99,6 +102,7 @@ domande = [
     "Sei mai uscito senza mutande?",
     "Ti depili le parti intime?",
     "Ti masturbi?",
+    "Mostra il tuo sesso alla persona con cui stia facendo questo gioco.",
     "Ti piace essere sculacciato/a?",
     "Ti sei mai masturbato pensando a qualcuno che conosci?",
     "Ti si è mai rotto un preservativo?",
@@ -106,6 +110,7 @@ domande = [
     "Il dolore secondo te fa un po' parte del piacere?",
     "Quando hai visto il tuo primo pisello o la tua prima patata?",
     "É mai successo qualcosa con un tuo parente?",
+    "Bacia la persona con cui stai facendo questo gioco.",
     "Quanto duri prima di venire?",
     "Qual è stata la tua peggior scopata?",
     "Hai mai fatto o ricevuto una sega con i piedi?",
@@ -211,15 +216,18 @@ async def messaggio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data.get("attesa_eta"):
         text = update.message.text.strip()
-        if not text.isdigit() or not (18 <= int(text) <= 99):
-            await update.message.reply_text("⛔ Inserisci un'età valida (18-99).")
-            return
-
-        profili.setdefault(user_id, {})["eta"] = text
-        salva_profili()
-        context.user_data["attesa_eta"] = False
-        await update.message.reply_text(f"✅ Età impostata su: {text} anni")
+    if not text.isdigit() or not (18 <= int(text) <= 99):
+        await update.message.reply_text("⛔ Inserisci un'età valida (18-99).")
         return
+
+    profilo = profili.setdefault(user_id, {})
+    profilo["eta"] = text
+    profilo["username"] = update.message.from_user.username or ""
+
+    salva_profili()
+    context.user_data["attesa_eta"] = False
+    await update.message.reply_text(f"✅ Età impostata su: {text} anni")
+    return
 
     if user_id not in coppie:
         await update.message.reply_text("🔎 Scrivi `/cerca` per trovare un partner anonimo!", parse_mode="Markdown")
@@ -281,6 +289,82 @@ async def messaggio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(user_id, "🔥 _Ti ricordo che puoi passare alla prossima domanda_ 🔥", reply_markup=tastiera, parse_mode="Markdown")
         await context.bot.send_message(partner_id, "🔥 _Ti ricordo che puoi passare alla prossima domanda_ 🔥", reply_markup=tastiera, parse_mode="Markdown")
         conta_messaggi[coppia_id] = 0  # Reset del contatore
+
+# Invita un amico a giocare
+async def gioca_con(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    if user_id in coppie:
+        await update.message.reply_text("Sei già in chat anonima! 😏")
+        return
+
+    if not context.args:
+        await update.message.reply_text("❗ Usa il comando così: `/gioca_con @username`", parse_mode="Markdown")
+        return
+
+    username_target = context.args[0].lstrip("@")
+
+    # Cerca l'ID dell'utente target dai profili
+    target_id = None
+    for uid, profilo in profili.items():
+        if profilo.get("username", "").lower() == username_target.lower():
+            target_id = int(uid)
+            break
+
+    if not target_id:
+        await update.message.reply_text("❌ Utente non trovato o non ha impostato il suo username con `/profilo`.")
+        return
+
+    if target_id == user_id:
+        await update.message.reply_text("❗ Non puoi giocare con te stesso.")
+        return
+
+    if target_id in coppie:
+        await update.message.reply_text("❌ L'utente è già in chat anonima.")
+        return
+
+    # Invia richiesta all'altro utente
+    context.user_data["invito_inviato"] = target_id
+    await context.bot.send_message(target_id, f"🔥 L'utente @{update.message.from_user.username} vuole giocare con te! Scrivi `/accetta` per iniziare.")
+    await update.message.reply_text(f"✅ Richiesta inviata a @{username_target}. Aspettiamo che accetti con `/accetta`.")
+
+async def accetta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    # Controlla chi ha invitato questo utente
+    invitante_id = None
+    for uid, data in context.application.user_data.items():
+        if isinstance(data, dict) and data.get("invito_inviato") == user_id:
+            invitante_id = uid
+            break
+
+    if not invitante_id:
+        await update.message.reply_text("❌ Nessuna richiesta di gioco trovata.")
+        return
+
+    # Accoppia i due utenti
+    coppie[user_id] = invitante_id
+    coppie[invitante_id] = user_id
+
+    lista_mischiata = random.sample(domande, len(domande))
+    domande_shuffle[user_id] = lista_mischiata
+    domande_shuffle[invitante_id] = lista_mischiata
+    indice_domanda[user_id] = 0
+    indice_domanda[invitante_id] = 0
+    attesa_prossima[user_id] = False
+    attesa_prossima[invitante_id] = False
+    attesa_inizio[user_id] = False
+    attesa_inizio[invitante_id] = False
+
+    tastiera = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Inizia il gioco 🔥", callback_data="inizia_gioco")]
+    ])
+
+    await update.message.reply_text("✅ Hai accettato! Quando siete pronti, cliccate su 'Inizia il gioco' 🔥", reply_markup=tastiera)
+    await context.bot.send_message(invitante_id, "✅ Il tuo partner ha accettato! Quando siete pronti, cliccate su 'Inizia il gioco' 🔥", reply_markup=tastiera)
+
+    # Rimuovi l'invito
+    context.application.user_data[invitante_id].pop("invito_inviato", None)
 
 # ESCI DALLA CHAT
 async def esci(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -445,9 +529,10 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("esci", esci))
     app.add_handler(CommandHandler("profilo", profilo))
     app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("gioca_con", gioca_con))
+    app.add_handler(CommandHandler("accetta", accetta))
     app.add_handler(CallbackQueryHandler(gestisci_pulsante))
-    app.add_handler(MessageHandler(filters.ALL, messaggio))  # L'ultimo, prende tutto il resto
-
+    app.add_handler(MessageHandler(filters.ALL, messaggio))  # Ultimissimo
 
     print("Bot in esecuzione...")
     app.run_polling()
